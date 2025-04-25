@@ -12,7 +12,6 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import glutInit, glutSolidCube, glutBitmapCharacter, GLUT_BITMAP_HELVETICA_12
 
-
 class GridWorld3DEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
@@ -44,7 +43,7 @@ class GridWorld3DEnv(gym.Env):
 
         self.window = None
         self.clock = None
-        
+        self._current_step = 0
         self.step_size = 1
         
         self._fig = None
@@ -67,6 +66,8 @@ class GridWorld3DEnv(gym.Env):
         # Choose initial agent and target locations 
         self._agent_location = self.np_random.uniform(0,self.size,size = 3).astype(np.float32)
         self._target_location = self.np_random.uniform(0,self.size,size = 3).astype(np.float32)
+
+        self._current_step = 0
         
         # We will sample the target's location randomly until it does not
         # coincide with the agent's location
@@ -97,11 +98,18 @@ class GridWorld3DEnv(gym.Env):
         )
 
         #an episode is done if the agent has reached the target or is near a certain threshold (0.5)
-        terminated = self._get_info()["distance"] < 0.5
-        reward = 1 if terminated else 0
+        terminated = self._get_info()["distance"] < 1
+        
         observation = self._get_obs()
         info = self._get_info()
 
+        if not terminated:
+
+            reward = (- (1 - (1/info["distance"]))) / 10
+
+        else:
+            reward = 0
+        
         if self.render_mode == "human" or self.render_mode == "rgb_array":
             self._render_frame()
 
