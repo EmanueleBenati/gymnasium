@@ -7,6 +7,7 @@ import numpy as np
 import pygame 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+
 from pygame.locals import DOUBLEBUF, OPENGL
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -15,7 +16,7 @@ from OpenGL.GLUT import glutInit, glutSolidCube, glutBitmapCharacter, GLUT_BITMA
 class GridWorld3DEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    def __init__(self, render_mode = None, size = 50):
+    def __init__(self, render_mode = None, size = 100):
         self.size = size
         self.window_size = 512
 
@@ -40,11 +41,12 @@ class GridWorld3DEnv(gym.Env):
         human-mode. They will remain `None` until human-mode is used for the
         first time.
         """
-
+        self._fig = None
+        self._ax = None
         self.window = None
         self.clock = None
         self._current_step = 0
-        self.step_size = 1
+        self.step_size = 2
         
         self._fig = None
         # Interactive mode
@@ -78,37 +80,45 @@ class GridWorld3DEnv(gym.Env):
         observation = self._get_obs()
         info = self._get_info()
 
-        if self.render_mode == "human":
+        if self.render_mode == "rgb_array":
             self._render_frame()
 
         return observation, info 
     
     def step(self,action):
 
+        self._previous_distance = self._get_info()["distance"]
         # Update agent position
         direction_agent = action * self.step_size
         self._agent_location = np.clip(
             self._agent_location + direction_agent,0,self.size,
         )
+        self._current_distance = self._get_info()["distance"]
         
         # Update target position 
+        
         direction_target = self.np_random.uniform(-1,1,size = 3).astype(np.float32)
+        
         self._target_location = np.clip(
             self._target_location + direction_target, 0, self.size
         )
-
-        #an episode is done if the agent has reached the target or is near a certain threshold (0.5)
-        terminated = self._get_info()["distance"] < 1
         
+        #an episode is done if the agent has reached the target or is near a certain threshold (1)
+
+        terminated = self._current_distance < 1.0
+
         observation = self._get_obs()
         info = self._get_info()
+        info['previous_distance'] = self._previous_distance
+        info['current_distance'] = self._current_distance
 
         if not terminated:
-
-            reward = (- (1 - (1/info["distance"]))) / 10
-
+            if self._previous_distance > self._current_distance:
+                reward = -0.1
+            else:
+                reward = -0.9
         else:
-            reward = 0
+            reward = 1.0
         
         if self.render_mode == "human" or self.render_mode == "rgb_array":
             self._render_frame()
@@ -118,86 +128,44 @@ class GridWorld3DEnv(gym.Env):
     def render(self):
         return self._render_frame()
 
-    #Define rendering  via matplotlib 
     def _render_frame(self):
-        if self.window is None:
-            pygame.init()
-            self.window = pygame.display.set_mode((700, 700), DOUBLEBUF | OPENGL)
-            pygame.display.set_caption("GridWorld 3D - PyOpenGL")
-            glEnable(GL_DEPTH_TEST)
-            glMatrixMode(GL_PROJECTION)
-            gluPerspective(45, 1.0, 0.1,300.0)
-            glMatrixMode(GL_MODELVIEW)
-            glTranslatef(-self.size / 2, -self.size / 2, -self.size * 2)
+        if self._fig is None:
+            # Prima volta: creo la figura e i 2 punti
+            self._fig = plt.figure()
+            self._ax = self._fig.add_subplot( projection='3d')
+            self._agent_scatter = self._ax.scatter([], [], [], color='blue', s=100)
+            self._target_scatter = self._ax.scatter([], [], [], color='red', s=100)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.close()
+            self._ax.set_xlim(0, self.size)
+            self._ax.set_ylim(0, self.size)
+            self._ax.set_zlim(0, self.size)
 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+         # Aggiorno SOLO la posizione dei punti
+        self._agent_scatter._offsets3d = (
+            [self._agent_location[0]],
+            [self._agent_location[1]],
+            [self._agent_location[2]],
+        )
+        self._target_scatter._offsets3d = (
+            [self._target_location[0]],
+            [self._target_location[1]],
+            [self._target_location[2]],
+        )
 
-        def draw_cube(pos, color=(1, 1, 1), size=1.5):
-            x, y, z = pos
-            s = size / 2
-            vertices = [
-                (x - s, y - s, z - s), (x + s, y - s, z - s),
-                (x + s, y + s, z - s), (x - s, y + s, z - s),
-                (x - s, y - s, z + s), (x + s, y - s, z + s),
-                (x + s, y + s, z + s), (x - s, y + s, z + s),
-            ]
-            faces = [(0,1,2,3),(4,5,6,7),(0,1,5,4),(2,3,7,6),(1,2,6,5),(0,3,7,4)]
-            glColor3f(*color)
-            glBegin(GL_QUADS)
-            for face in faces:
-                for v in face:
-                    glVertex3f(*vertices[v])
-            glEnd()
+        self._fig.canvas.draw()
 
-        def draw_axes(length=10):
-            glBegin(GL_LINES)
-            glColor3f(1, 0, 0)  # X - rosso
-            glVertex3f(0, 0, 0)
-            glVertex3f(length, 0, 0)
-            glColor3f(0, 1, 0)  # Y - verde
-            glVertex3f(0, 0, 0)
-            glVertex3f(0, length, 0)
-            glColor3f(0, 0, 1)  # Z - blu
-            glVertex3f(0, 0, 0)
-            glVertex3f(0, 0, length)
-            glEnd()
 
-        def draw_wireframe_cube(size):
-            s = size
-            glColor3f(0.5, 0.5, 0.5)
-            glBegin(GL_LINES)
-            for x in [0, s]:
-                for y in [0, s]:
-                    glVertex3f(x, y, 0)
-                    glVertex3f(x, y, s)
-            for x in [0, s]:
-                for z in [0, s]:
-                    glVertex3f(x, 0, z)
-                    glVertex3f(x, s, z)
-            for y in [0, s]:
-                for z in [0, s]:
-                    glVertex3f(0, y, z)
-                    glVertex3f(s, y, z)
-            glEnd()
+        # converte il canvas matplotlib in array RGB
+        frame = np.frombuffer(self._fig.canvas.tostring_rgb(), dtype=np.uint8)
+        frame = frame.reshape(self._fig.canvas.get_width_height()[::-1] + (3,))
 
-        draw_axes(length=self.size / 4)
-        draw_wireframe_cube(size=self.size)
-
-        # agent = blu, target = rosso
-        draw_cube(self._agent_location, color=(0, 0, 1))
-        draw_cube(self._target_location, color=(1, 0, 0))
-
-        pygame.display.flip()
-        pygame.time.wait(int(1000 / self.metadata["render_fps"]))
-
-        if self.render_mode == "rgb_array":
+        if self.render_mode == "human":
+            plt.pause(0.25)
             return None
+        elif self.render_mode == "rgb_array":
+            return frame
 
-    
+
     def close(self):
         if hasattr(self, "_fig") and self._fig is not None:
             plt.close(self._fig)
